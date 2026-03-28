@@ -23,7 +23,7 @@ services:
       - NODE_TLS_REJECT_UNAUTHORIZED=0
       - REDIS_HOST=redis
     env_file:
-      - ${SECRETS_PATH:-.}/.env
+      - ${SECRETS_PATH:-./secrets}/.env
     deploy:
       resources:
         limits:
@@ -44,7 +44,7 @@ services:
       - NODE_TLS_REJECT_UNAUTHORIZED=0
       - REDIS_HOST=redis
     env_file:
-      - ${SECRETS_PATH:-.}/.env
+      - ${SECRETS_PATH:-./secrets}/.env
     deploy:
       resources:
         limits:
