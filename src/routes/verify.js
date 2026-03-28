@@ -4,6 +4,7 @@ const config = require("../config");
 const cryptoUtils = require("../utils/crypto_utils");
 const VerifyService = require("../services/verify_service");
 const redisClient = require("../utils/redis_client"); // Redis 모듈 불러오기
+const logger = require("../utils/logger");
 
 router.post("/request", async (req, res) => {
   try {
@@ -28,7 +29,6 @@ router.post("/request", async (req, res) => {
 
     const targetSender = `${phoneNumber}@${config.EMAIL_DOMAIN[carrier]}`;
 
-    // 2. ⭐️ 외부망(IMAP) 대신 초고속 Redis 메모리에서 즉시 코드 조회!
     const mailCode = await redisClient.get(`verify:${targetSender}`);
 
     if (!mailCode) {
@@ -57,7 +57,7 @@ router.post("/request", async (req, res) => {
 
     return res.status(200).json({ message: "telephone_Verification_Success" });
   } catch (err) {
-    console.error("[ERROR] 인증 라우터 오류:", err);
+    logger.error("[ERROR] 인증 라우터 오류:", err);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -71,6 +71,7 @@ router.post("/key", (req, res) => {
     const hmacResponse = cryptoUtils.generateHmacResponse(challengeCode);
     return res.json({ hmac: hmacResponse });
   } catch (err) {
+    logger.error("[ERROR] 인증 라우터 오류:", err);
     return res.status(500).json({ error: err.message });
   }
 });

@@ -1,6 +1,7 @@
 const imaps = require("imap-simple");
 const { simpleParser } = require("mailparser");
 const config = require("../config");
+const logger = require("../utils/logger"); // 로거 추가
 
 const EmailService = {
   /**
@@ -19,12 +20,14 @@ const EmailService = {
 
       const extractedCode = body.split("====")[0].trim();
       if (extractedCode.length >= 60 && extractedCode.length <= 100) {
-        console.log("코드 추출 성공", extractedCode);
+        logger.debug(
+          `[IMAP-EXTRACT] 코드 추출 성공: ${extractedCode.substring(0, 10)}...`,
+        ); // 상세 데이터는 debug
         return extractedCode;
       }
       return null;
     } catch (err) {
-      console.error("이메일 코드 추출 실패:", err);
+      logger.error(`[IMAP-EXTRACT] 이메일 코드 추출 실패: ${err.message}`); // 에러 발생 시
       return null;
     }
   },
@@ -35,17 +38,17 @@ const EmailService = {
   fetchLatestCode: async (targetSender) => {
     let connection;
     try {
-      console.log("[IMAP] 연결 시도 중...");
+      logger.debug(`[IMAP-FETCH] '${targetSender}' 연결 시도 중...`);
       connection = await imaps.connect({ imap: config.IMAP_CONFIG });
       await connection.openBox("INBOX");
-      console.log("[IMAP] INBOX 열기 성공. 연결 완료.");
+      logger.debug("[IMAP-FETCH] INBOX 열기 성공. 연결 완료.");
 
       const delay = 5 * 60 * 1000; // 5분
       const fiveMinutesAgo = new Date();
       fiveMinutesAgo.setTime(Date.now() - delay);
 
-      console.log(
-        `[IMAP] 검색 조건: '${targetSender}' 로부터, ${fiveMinutesAgo.toISOString()} 이후 수신된 메일`,
+      logger.debug(
+        `[IMAP-SEARCH] 검색 조건: ${targetSender}, SINCE: ${fiveMinutesAgo.toISOString()}`,
       );
 
       const searchCriteria = [
@@ -54,37 +57,32 @@ const EmailService = {
       ];
       const fetchOptions = { bodies: ["HEADER", "TEXT"], struct: true };
 
-      console.log("[IMAP] 조건에 맞는 이메일 검색 중...");
       const messages = await connection.search(searchCriteria, fetchOptions);
-      console.log(`[IMAP] 검색된 메일 총 개수: ${messages.length}개`);
+      logger.debug(`[IMAP-RESULT] 검색된 메일 총 개수: ${messages.length}개`);
 
       // 최근 3개 이메일만 확인 (뒤에서부터 3개)
       const targetMessages = messages.slice(-3).reverse();
-      console.log(
-        `[IMAP] 검사할 메일 개수(최근 최대 3개): ${targetMessages.length}개`,
-      );
 
       for (let i = 0; i < targetMessages.length; i++) {
         const msg = targetMessages[i];
-        console.log(`[IMAP] 메일 #${i + 1} 본문에서 인증 코드 추출 시도...`);
+        logger.debug(`[IMAP-CHECK] 메일 #${i + 1} 추출 시도...`);
         const extracted = await EmailService.extractEmailCode(msg);
 
         if (extracted) {
-          console.log(
-            `[IMAP] ✅ 유효한 코드 발견 성공 (길이: ${extracted.length}자)`,
-          );
+          logger.info(`[IMAP-SUCCESS] 유효 코드 발견: ${targetSender}`); // 성공 시 info
           return extracted;
-        } else {
-          console.log(`[IMAP] ❌ 메일 #${i + 1}에서 코드를 찾지 못함.`);
         }
       }
 
+      logger.debug(`[IMAP-FAIL] '${targetSender}'로부터 유효 코드를 찾지 못함`);
+      return null;
+    } catch (err) {
+      logger.error(`[IMAP-FATAL] 메일 가져오기 중 치명적 오류: ${err.message}`);
       return null;
     } finally {
       if (connection) {
-        console.log("[IMAP] 정상 종료 처리 중...");
+        logger.debug("[IMAP-CLOSE] 연결 종료 중...");
         connection.end();
-        console.log("[IMAP] 연결 종료 완료.");
       }
     }
   },

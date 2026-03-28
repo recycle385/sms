@@ -1,6 +1,6 @@
 const redis = require("redis");
+const logger = require("./logger"); // 로거 추가
 
-// Redis 클라이언트 생성 (Docker-compose 설정에 맞춰 호스트명은 'redis')
 const redisClient = redis.createClient({
   socket: {
     host: process.env.REDIS_HOST || "127.0.0.1",
@@ -8,10 +8,12 @@ const redisClient = redis.createClient({
   },
 });
 
-redisClient.on("error", (err) => console.error("[REDIS ERROR]", err));
-redisClient.on("connect", () => console.log("[REDIS] 연결 성공!"));
+// console 대신 logger 사용
+redisClient.on("error", (err) => logger.error(`[REDIS ERROR] ${err.message}`));
+redisClient.on("connect", () => logger.info("[REDIS] 연결 성공!"));
 
-// 서버 구동 시 즉시 연결
-redisClient.connect().catch(console.error);
+redisClient
+  .connect()
+  .catch((err) => logger.error(`[REDIS-CONN] 실패: ${err.message}`));
 
 module.exports = redisClient;
