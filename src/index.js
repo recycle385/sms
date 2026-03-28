@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const verifyRouter = require("./routes/verify");
 const logger = require("./utils/logger"); // 로거 추가
