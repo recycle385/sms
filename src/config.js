@@ -31,28 +31,17 @@ const config = {
 
   // RSA 키 크기 제한
   MAX_RSA_KEY_SIZE: parseInt(process.env.MAX_RSA_KEY_SIZE || "4096"),
-
-  // IMAP 서버 설정
-  IMAP_CONFIG: {
-    user: process.env.EMAIL_USER,
-    password: process.env.EMAIL_PASSWORD,
-    host: "imap.gmail.com",
-    port: 993,
-    tls: true,
-    authTimeout: 5000,
-    keepalive: {
-      interval: 10000,
-      idleInterval: 300000,
-      forceNoop: true,
-    },
-  },
 };
 
 const validateConfig = () => {
   const errors = [];
+
+  // 변경된 필수 환경 변수 목록
   const requiredVars = [
     "EMAIL_USER",
-    "EMAIL_PASSWORD",
+    "GMAIL_CLIENT_ID",
+    "GMAIL_CLIENT_SECRET",
+    "GMAIL_REFRESH_TOKEN",
     "HMAC_KEY",
     "P_K_CONTENT",
   ];
