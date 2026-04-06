@@ -12,6 +12,9 @@ const {
   targetLimiter,
 } = require("../utils/rate_limiter");
 
+const SEARCH_QUEUE_KEY = "verify:search_queue";
+const WORKER_CHANNEL = "worker_channel";
+
 router.post("/request", requestLimiter, async (req, res) => {
   try {
     const encryptedData = req.body.d;
@@ -46,7 +49,6 @@ router.post("/request", requestLimiter, async (req, res) => {
     const mailCode = await redisClient.get(`verify:${targetSender}`);
 
     if (!mailCode) {
-      // 워커가 아직 메일을 처리하지 못했거나, 메일이 안 온 상태
       return res
         .status(404)
         .json({ message: "유효한 인증 코드가 없습니다 (잠시 후 다시 시도)" });
@@ -68,6 +70,7 @@ router.post("/request", requestLimiter, async (req, res) => {
 
     // 4. 인증 성공 시, 재사용 방지를 위해 Redis에서 데이터 삭제
     await redisClient.del(`verify:${targetSender}`);
+    await redisClient.zRem(SEARCH_QUEUE_KEY, targetSender);
 
     return res.status(200).json({ message: "telephone_Verification_Success" });
   } catch (err) {
@@ -102,9 +105,14 @@ router.post("/key", targetLimiter, keyLimiter, async (req, res) => {
 
     await redisClient.del(`verify:${targetSender}`);
 
-    await redisClient.set(`search:${targetSender}`, startAt.toString(), {
-      EX: 40,
+    await redisClient.zAdd(SEARCH_QUEUE_KEY, {
+      score: startAt,
+      value: targetSender,
     });
+
+    await redisClient.expire(SEARCH_QUEUE_KEY, 120);
+
+    await redisClient.publish(WORKER_CHANNEL, "start");
 
     logger.info(
       `[API] 탐색 예약: search:${targetSender} (StartAt: ${startAt})`,

@@ -4,6 +4,9 @@ const config = require("../config");
 const logger = require("../utils/logger");
 const redisClient = require("../utils/redis_client");
 
+const SEARCH_QUEUE_KEY = "verify:search_queue";
+const MAIL_SIZE_LIMIT = 5 * 1024; // 10KB
+
 const oauth2Client = new google.auth.OAuth2(
   config.GMAIL_CONFIG.clientId,
   config.GMAIL_CONFIG.clientSecret,
@@ -14,20 +17,62 @@ oauth2Client.setCredentials({
 
 const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
+function buildCarrierQuery() {
+  const domains = Object.values(config.EMAIL_DOMAIN).filter(Boolean);
+  if (domains.length === 0) return "is:unread";
+  return `from:(${domains.join(" OR ")}) is:unread`;
+}
+
+function isAuthValid(parsedMail) {
+  const authResults = parsedMail.headers.get("authentication-results");
+  if (!authResults) {
+    logger.warn("[GMAIL-AUTH] authentication-results 헤더 없음 → 무시");
+    return false;
+  }
+  const headerStr = Array.isArray(authResults)
+    ? authResults.join(" ")
+    : String(authResults);
+
+  const spfPass = /spf=pass/i.test(headerStr);
+  const dkimPass = /dkim=pass/i.test(headerStr);
+
+  if (!spfPass && !dkimPass) {
+    logger.warn(`[GMAIL-AUTH] SPF/DKIM 모두 실패 → 위조 메일 의심, 무시`);
+    return false;
+  }
+  return true;
+}
+
 const EmailService = {
   fetchAndMatchMails: async (validSenders) => {
     try {
+      const query = buildCarrierQuery();
+
       // 1. 읽지 않은 메일 목록 조회
       const res = await gmail.users.messages.list({
         userId: "me",
-        q: "is:unread",
-        maxResults: 10,
+        q: query,
+        maxResults: validSenders.length + 1, // 여유분 1
       });
 
       if (!res.data.messages) return;
 
       for (const msgInfo of res.data.messages) {
         // 2. 메일을 "원본(Raw)" 포맷으로 가져오기
+        const meta = await gmail.users.messages.get({
+          userId: "me",
+          id: msgInfo.id,
+          format: "metadata",
+          metadataHeaders: ["From", "Authentication-Results"],
+        });
+
+        if ((meta.data.sizeEstimate || 0) > MAIL_SIZE_LIMIT) {
+          logger.warn(
+            `[GMAIL-SIZE] 크기 초과 메일 폐기: ${meta.data.sizeEstimate} bytes`,
+          );
+          continue;
+        }
+
         const msg = await gmail.users.messages.get({
           userId: "me",
           id: msgInfo.id,
@@ -42,6 +87,13 @@ const EmailService = {
 
         const parsedMail = await simpleParser(buffer);
 
+        await gmail.users.messages.batchModify({
+          userId: "me",
+          requestBody: { ids: [msgInfo.id], removeLabelIds: ["UNREAD"] },
+        });
+
+        if (!isAuthValid(parsedMail)) continue;
+
         // 보낸 사람 주소 추출
         const sender = parsedMail.from?.value[0]?.address;
 
@@ -51,13 +103,8 @@ const EmailService = {
 
           if (extractedCode.length >= 60) {
             await redisClient.setEx(`verify:${sender}`, 300, extractedCode);
-            await redisClient.del(`search:${sender}`);
+            await redisClient.zRem(SEARCH_QUEUE_KEY, sender);
 
-            // 읽음 처리 (라벨 수정)
-            await gmail.users.messages.batchModify({
-              userId: "me",
-              requestBody: { ids: [msgInfo.id], removeLabelIds: ["UNREAD"] },
-            });
             logger.info(`[GMAIL-SUCCESS] 코드 획득: ${sender}`);
           } else {
             logger.warn(
